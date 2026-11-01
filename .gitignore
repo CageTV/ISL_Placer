@@ -1,0 +1,8 @@
+backups/
+*.dll
+*.pdb
+*.zip
+release/
+plugin/build/
+plugin/build-local/vcpkg_installed/
+plugin/*.log

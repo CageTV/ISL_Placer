@@ -1,0 +1,22 @@
+ISL Placer
+Copyright (C) 2026 CageTV
+
+The files written for this project are under the MIT License (see LICENSE). The "ISLPlacer.dll" built with alandtse's CommonLibSSE-NG ("new", Skyrim
+1.6.1170 and newer) is a combined work under the GNU General Public License, version 3 or later, as that library requires; the "older" DLL (VR and 1.6.1130
+and below, CharmedBaryon's CommonLibSSE-NG, MIT) stays under the MIT License. The full texts are in LICENSE.
+
+Complete source code (the "corresponding source" the GPL asks for) of the DLLs in this archive: https://github.com/CageTV/ISL_Placer
+
+Third-party components built into the DLL
+- CommonLibSSE-NG by alandtse (GPL-3.0-or-later with a modding exception; in the "new" DLL) and by CharmedBaryon / Ryan-rsm-McKenzie (MIT; in the "older" DLL), and SKSE (Skyrim Script Extender), used as the plugin framework.
+- nlohmann/json, Copyright (c) 2013-2022 Niels Lohmann, MIT license.
+- spdlog, Copyright (c) Gabi Melman, MIT license.
+- SKSE Menu Framework by Thiago099: src/SKSEMenuFramework.h is its client header, used to register the menu page. The framework itself is a separate
+  mod that the user installs; it is not included here.
+The MIT license: permission is granted, free of charge, to use, copy, modify, merge, publish, distribute, sublicense and sell copies of the software, provided
+the copyright notice and this permission notice are included. The software is provided "as is", without warranty of any kind.
+
+Works with, but includes no code of
+- Light Placer by powerof3 (GPL-3.0). ISL Placer reads and writes the json file format that Light Placer defines.
+- ISL Helper SKSE by InTheBottle (MIT).
+- Community Shaders (Inverse Square Lighting).
