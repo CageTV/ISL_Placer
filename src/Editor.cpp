@@ -307,18 +307,24 @@ namespace Editor
 		std::vector<IndexEntry> index;
 		int                     indexFiles{ 0 };
 		bool                    indexed{ false };
+		std::vector<std::string> hiddenFiles;  // Data/LightPlacer/**/*.json.hidden: files this plugin switched off
 
 		void BuildIndex()
 		{
 			namespace fs = std::filesystem;
 			std::vector<IndexEntry> list;
 			int                     files = 0;
+			std::vector<std::string> hidden;
 			std::error_code         ec;
 			const fs::path          root{ "Data/LightPlacer" };
 			if (fs::is_directory(root, ec)) {
 				for (auto it = fs::recursive_directory_iterator(root, ec); it != fs::recursive_directory_iterator(); it.increment(ec)) {
 					if (ec) {
 						break;
+					}
+					if (it->is_regular_file(ec) && it->path().extension() == ".hidden" && it->path().stem().extension() == ".json") {
+						hidden.push_back(it->path().generic_string());
+						continue;
 					}
 					if (!it->is_regular_file(ec) || it->path().extension() != ".json") {
 						continue;
@@ -387,6 +393,7 @@ namespace Editor
 			}
 			std::scoped_lock l(indexLock);
 			index = std::move(list);
+			hiddenFiles = std::move(hidden);
 			indexFiles = files;
 			indexed = true;
 			logger::info("Light Placer index: {} files, {} entries", files, index.size());
@@ -402,6 +409,10 @@ namespace Editor
 
 		constexpr auto kBackupDir = "Data/SKSE/Plugins/ISLPlacer/backups";
 		constexpr auto kManifest = "Data/SKSE/Plugins/ISLPlacer/overrides.json";
+		constexpr auto kDisabled = "Data/SKSE/Plugins/ISLPlacer/disabled.json";  // memory of the files switched off
+
+		std::vector<std::string> LoadDisabled();
+		void                     SaveDisabled(const std::vector<std::string>& a_list);
 
 		std::mutex               patchLock;
 		std::string              patchText;
@@ -515,6 +526,31 @@ namespace Editor
 				out.push_back(i + 1 < lines.size() ? lines[i].first + (lines[i].second ? " OR" : " AND") : lines[i].first);
 			}
 			return out;
+		}
+
+		std::vector<std::string> LoadDisabled()
+		{
+			std::vector<std::string> list;
+			json                     m;
+			std::string              err;
+			if (LoadArray(kDisabled, m, err)) {
+				for (const auto& e : m) {
+					if (e.is_string()) {
+						list.push_back(e.get<std::string>());
+					}
+				}
+			}
+			return list;
+		}
+
+		void SaveDisabled(const std::vector<std::string>& a_list)
+		{
+			json        m = json::array();
+			std::string err;
+			for (const auto& e : a_list) {
+				m.push_back(e);
+			}
+			SaveJson(kDisabled, m, err);
 		}
 
 		json LoadManifest()
@@ -736,88 +772,105 @@ namespace Editor
 		SetPatchStatus(std::format("Removed {} entry from {}. Restart the game for it to take effect.", removed, kPatchFile));
 	}
 
-	void DisableMatch(const std::string& a_file, int a_entry, const std::string& a_by)
+	void DisableFile(const std::string& a_file)
 	{
-		const auto t = GetTarget();
-		if (!t.valid) {
-			SetPatchStatus("Pick a light first.");
+		namespace fs = std::filesystem;
+		if (a_file == kPatchFile || a_file.size() < 6 || a_file.substr(a_file.size() - 5) != ".json") {
+			SetPatchStatus("Only another mod's .json file under Data/LightPlacer can be disabled.");
 			return;
 		}
-		if (a_file == kPatchFile) {
-			SetPatchStatus("That is our own file: use 'Remove my entry' instead.");
+		const fs::path  from{ a_file };
+		const fs::path  to{ a_file + ".hidden" };
+		std::error_code ec;
+		if (fs::exists(to, ec)) {
+			SetPatchStatus(to.generic_string() + " already exists: re-enable or delete it first.");
 			return;
 		}
-		const fs::path p{ a_file };
-		json           arr;
-		std::string    err;
-		if (!LoadArray(p, arr, err)) {
-			SetPatchStatus(err);
+		fs::rename(from, to, ec);
+		if (ec) {
+			SetPatchStatus("Could not disable " + a_file + " (" + ec.message() + ").");
 			return;
 		}
-		if (a_entry < 0 || a_entry >= static_cast<int>(arr.size()) || !arr[a_entry].is_object()) {
-			SetPatchStatus("That entry is not there any more: scan the Light Placer files again.");
+		// the mod manager's virtual file system decides where the rename lands: check that the original is really gone
+		if (fs::exists(from, ec) || !fs::exists(to, ec)) {
+			fs::rename(to, from, ec);
+			SetPatchStatus("The mod manager did not let " + a_file + " be renamed, nothing was changed. Disable that file in your mod manager instead.");
 			return;
 		}
-		auto&      e = arr[a_entry];
-		const auto model = NormModel(t.model);
-		const auto edid = Lower(t.baseEdid);
-		int        removed = 0;
-		const auto strip = [&](const char* a_key, const auto& a_match) {
-			if (e.contains(a_key) && e[a_key].is_array()) {
-				auto& list = e[a_key];
-				for (auto it = list.begin(); it != list.end();) {
-					if (it->is_string() && a_match(it->get<std::string>())) {
-						it = list.erase(it);
-						++removed;
-					} else {
-						++it;
-					}
-				}
+		{
+			auto list = LoadDisabled();
+			if (std::ranges::find(list, a_file) == list.end()) {
+				list.push_back(a_file);
+				SaveDisabled(list);
 			}
-		};
-		if (a_by == "model") {
-			strip("models", [&](const std::string& a_s) { return NormModel(a_s) == model; });
-		} else {
-			strip("formIDs", [&](const std::string& a_s) { return Lower(a_s) == edid; });
-			strip("visualEffects", [&](const std::string& a_s) { return Lower(a_s) == edid; });
-		}
-		if (!removed) {
-			SetPatchStatus("This entry does not name the picked object any more: scan the Light Placer files again.");
-			return;
-		}
-		const auto isEmpty = [&](const char* a_key) { return !e.contains(a_key) || !e[a_key].is_array() || e[a_key].empty(); };
-		if (isEmpty("models") && isEmpty("formIDs") && isEmpty("visualEffects") && !e.contains("addonNodes")) {
-			arr.erase(arr.begin() + a_entry);
-		}
-
-		// keep the very first version of each file so that it can be put back
-		auto manifest = LoadManifest();
-		bool known = false;
-		for (const auto& m : manifest) {
-			known |= m.is_object() && m.value("file", "") == a_file;
-		}
-		if (!known) {
-			std::error_code ec;
-			fs::create_directories(kBackupDir, ec);
-			const auto backup = fs::path(kBackupDir) / FlatName(a_file);
-			fs::copy_file(p, backup, fs::copy_options::overwrite_existing, ec);
-			if (ec) {
-				SetPatchStatus("Could not back up " + a_file + " (" + ec.message() + "): nothing was changed.");
-				return;
-			}
-			manifest.push_back({ { "file", a_file }, { "backup", backup.generic_string() } });
-			if (!SaveJson(kManifest, manifest, err)) {
-				SetPatchStatus(err + ": nothing was changed.");
-				return;
-			}
-		}
-		if (!SaveJson(p, arr, err)) {
-			SetPatchStatus(err);
-			return;
 		}
 		RescanJson();
-		SetPatchStatus(std::format("Took {} out of {} (entry {}). The original is kept; 'Put back' restores it. Restart the game for it to take effect.", model.empty() ? edid : model,
-			a_file, a_entry));
+		SetPatchStatus("Disabled " + a_file + " by renaming it to " + a_file + ".hidden. This switches off EVERY light that file defines, not only the picked object. Takes effect at the next game load; use 'Re-enable' to undo.");
+	}
+
+	void EnableFile(const std::string& a_hidden)
+	{
+		namespace fs = std::filesystem;
+		const std::string suffix = ".hidden";
+		if (a_hidden.size() <= suffix.size() || a_hidden.substr(a_hidden.size() - suffix.size()) != suffix) {
+			return;
+		}
+		const std::string orig = a_hidden.substr(0, a_hidden.size() - suffix.size());
+		const fs::path    to{ orig };
+		std::error_code   ec;
+		const auto        forget = [&]() {
+			auto list = LoadDisabled();
+			std::erase(list, orig);
+			SaveDisabled(list);
+		};
+		if (fs::exists(to, ec)) {
+			if (!fs::exists(fs::path(a_hidden), ec)) {
+				forget();  // it is back already (put back by hand or by the mod manager)
+				SetPatchStatus(orig + " is already in place. Removed it from the list.");
+			} else {
+				SetPatchStatus(orig + " already exists, so " + a_hidden + " cannot be switched back on.");
+			}
+			return;
+		}
+		if (!fs::exists(fs::path(a_hidden), ec)) {
+			forget();
+			SetPatchStatus(a_hidden + " no longer exists. Removed it from the list.");
+			return;
+		}
+		fs::rename(fs::path(a_hidden), to, ec);
+		if (ec) {
+			SetPatchStatus("Could not re-enable " + a_hidden + " (" + ec.message() + ").");
+			return;
+		}
+		forget();
+		RescanJson();
+		SetPatchStatus("Re-enabled " + to.generic_string() + ". Takes effect at the next game load.");
+	}
+
+	std::vector<std::string> HiddenFiles()
+	{
+		// drawn every frame: read the memory file at most once a second
+		static std::chrono::steady_clock::time_point lastRead{};
+		static std::vector<std::string>              cache;
+		const auto now = std::chrono::steady_clock::now();
+		if (now - lastRead < std::chrono::seconds(1)) {
+			return cache;
+		}
+		lastRead = now;
+
+		// the remembered list first (the scan can miss a file the mod manager put in another folder), then anything the scan found
+		std::vector<std::string> out;
+		for (const auto& f : LoadDisabled()) {
+			out.push_back(f + ".hidden");
+		}
+		std::scoped_lock l(indexLock);
+		for (const auto& f : hiddenFiles) {
+			if (std::ranges::find(out, f) == out.end()) {
+				out.push_back(f);
+			}
+		}
+		cache = out;
+		return out;
 	}
 
 	std::vector<std::string> ChangedFiles()

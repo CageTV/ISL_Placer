@@ -274,10 +274,10 @@ namespace Menu
 					if (x.file != Editor::kPatchFile) {
 						PushID((x.file + "#" + std::to_string(x.entry)).c_str());
 						SameLine();
-						if (SmallButton("Turn off for this object")) {
-							Editor::DisableMatch(x.file, x.entry, x.by);
+						if (SmallButton("Disable this file")) {
+							Editor::DisableFile(x.file);
 						}
-						Tip("Takes this object out of that entry in a copy of the file (the original is kept and can be put back). Use it when a second file also lights the object.");
+						Tip("Renames the whole file to .json.hidden so Light Placer stops reading it (takes effect at the next game load). This switches off every light in that file, not only this object. Nothing else is touched; you can re-enable it below.");
 						PopID();
 					}
 					TextDisabled("    nodes: %s | lights: %s", nodes.empty() ? "-" : nodes.c_str(), lights.empty() ? "-" : lights.c_str());
@@ -286,10 +286,23 @@ namespace Menu
 					TextColored(ImVec4(1.0f, 0.6f, 0.2f, 1.0f), "%s", c.c_str());
 				}
 				if (!m.conflicts.empty()) {
-					TextDisabled("Each entry adds its own bulb: turn the others off for this object once ours is saved.");
+					TextDisabled("Each entry adds its own bulb. Disable the other file (button above) or remove our entry.");
 				}
 			}
 
+			const auto hidden = Editor::HiddenFiles();
+			if (!hidden.empty()) {
+				SeparatorText("Files I disabled");
+				for (const auto& f : hidden) {
+					PushID(f.c_str());
+					TextWrapped("%s", f.c_str());
+					SameLine();
+					if (SmallButton("Re-enable")) {
+						Editor::EnableFile(f);
+					}
+					PopID();
+				}
+			}
 			const auto changed = Editor::ChangedFiles();
 			if (!changed.empty()) {
 				SeparatorText("Files I changed");

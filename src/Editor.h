@@ -118,8 +118,10 @@ namespace Editor
 	void SavePatch(const SaveOptions& a_opt);
 	// Removes our entry for the picked object's model
 	void RemovePatch();
-	// Conflict resolution: takes the picked object's model (or editor id) out of one entry of another json. The original file is saved first.
-	void DisableMatch(const std::string& a_file, int a_entry, const std::string& a_by);
+	// Conflict resolution: switches a whole file off by renaming it to <file>.hidden (Light Placer only reads .json); EnableFile undoes it. Both take effect at the next game load.
+	void DisableFile(const std::string& a_file);
+	void EnableFile(const std::string& a_hidden);
+	std::vector<std::string> HiddenFiles();
 	// Files changed that way, so they can be put back
 	std::vector<std::string> ChangedFiles();
 	void                     RestoreFile(const std::string& a_file);
